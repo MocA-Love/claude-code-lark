@@ -1,0 +1,141 @@
+# Lark (Larksuite / Feishu) - Claude Code チャンネルプラグイン
+
+Lark ボットを Claude Code に接続する MCP サーバー。
+
+ボットがメッセージを受信すると、MCP サーバーが Claude に転送し、返信・リアクション・メッセージ編集のツールを提供します。**Lark**（国際版）と **Feishu / 飛書**（中国版）の両方に対応。
+
+## 前提条件
+
+- [Bun](https://bun.sh) — `curl -fsSL https://bun.sh/install | bash` でインストール
+
+## セットアップ手順
+
+> シングルユーザーDMボットのデフォルト設定。グループやマルチユーザーの設定は [ACCESS.md](./ACCESS.md) を参照。
+
+**1. Lark アプリとボットを作成**
+
+[Lark Open Platform](https://open.larksuite.com/app)（中国版: [Feishu Open Platform](https://open.feishu.cn/app)）で **Create Custom App** をクリック。
+
+**Features** → **Bot** でボット機能を有効化。
+
+**2. 権限を設定**
+
+**Permissions & Scopes** で以下を追加:
+
+- `im:message` — メッセージ読み取り
+- `im:message:send_as_bot` — ボットとしてメッセージ送信
+- `im:message.group_at_msg` — グループでの@メンション受信
+- `im:message.p2p_msg` — DM受信
+- `im:resource` — 添付ファイルのダウンロード
+- `im:chat` — チャット情報の読み取り
+
+バージョンを公開し、承認する（自作アプリはテナント管理者の承認が必要）。
+
+**3. イベントサブスクリプションを有効化**
+
+**Events & Callbacks** → **Event Configuration**:
+- **"Receive events through persistent connection"** を選択（推奨）
+- **Add Events** → `im.message.receive_v1`（メッセージ受信）を追加
+- Save
+
+公開URL、暗号化、Webhook設定は不要 — SDK が WebSocket で全て処理します。
+
+**4. アプリのクレデンシャルを取得**
+
+**Credentials & Basic Info** から **App ID** と **App Secret** をコピー。
+
+**5. プラグインをインストール**
+
+```bash
+git clone https://github.com/MocA-Love/claude-code-lark.git
+claude plugin marketplace add /path/to/claude-code-lark
+claude plugin install lark@claude-code-lark
+```
+
+**6. クレデンシャルを設定**
+
+```
+/lark:configure cli_xxxx your_app_secret_here
+```
+
+`~/.claude/channels/lark/.env` に `LARK_APP_ID` と `LARK_APP_SECRET` が保存されます。
+
+**7. チャネルフラグ付きで再起動**
+
+セッションを終了し、新しいセッションを開始:
+
+```sh
+claude --dangerously-load-development-channels plugin:lark@claude-code-lark
+```
+
+**8. ペアリング**
+
+Claude Code 実行中に、Lark でボットに DM を送信 → ペアリングコードが返されます。Claude Code セッションで:
+
+```
+/lark:access pair <code>
+```
+
+次の DM からアシスタントに届くようになります。
+
+**9. ロックダウン**
+
+ペアリングは ID 取得用。完了したら `allowlist` に切り替え:
+
+```
+/lark:access policy allowlist
+```
+
+## Feishu（中国版）の設定
+
+```
+/lark:configure domain open.feishu.cn
+```
+
+API ベース URL が `open.larksuite.com` から `open.feishu.cn` に変更されます。
+
+## アクセス制御
+
+詳細は **[ACCESS.md](./ACCESS.md)** を参照。
+
+- ユーザーID: Lark の **open_id**（例: `ou_xxxx`）
+- チャットID: **chat_id**（例: `oc_xxxx`）
+- デフォルトポリシー: `pairing`
+- グループチャット: chat_id 単位でオプトイン
+
+## アシスタントに公開されるツール
+
+| ツール | 機能 |
+| --- | --- |
+| `reply` | チャットに送信。`chat_id` + `text`、オプションで `reply_to`（スレッド）、`files`（添付ファイル） |
+| `react` | メッセージにリアクション追加。Lark絵文字名を使用（THUMBSUP, HEART, SMILE 等） |
+| `edit_message` | ボットが送信したメッセージを編集 |
+| `fetch_messages` | チャットの最近の履歴を取得（古い順、最大50件） |
+| `download_attachment` | メッセージの画像/ファイルをダウンロード |
+
+## 環境変数
+
+`~/.claude/channels/lark/.env` に設定:
+
+| 変数 | 必須 | 説明 |
+| --- | --- | --- |
+| `LARK_APP_ID` | Yes | Developer Console の App ID（`cli_` で始まる） |
+| `LARK_APP_SECRET` | Yes | Developer Console の App Secret |
+| `LARK_DOMAIN` | No | API ドメイン。デフォルト: `open.larksuite.com`。Feishu: `open.feishu.cn` |
+| `LARK_ACCESS_MODE` | No | `static` で起動時のアクセス設定を固定 |
+
+## アーキテクチャ
+
+```
+ユーザー (Lark) → Lark Cloud ←WebSocket→ Lark SDK (WSClient)
+                                              ↓
+                                        MCP Server ←stdio→ Claude Code
+                                              ↓
+                                        Lark REST API → ユーザー (Lark)
+```
+
+公開URLは不要。SDK が Lark サーバーへの永続的な WebSocket 接続を維持します。
+
+## ライセンス
+
+Apache-2.0

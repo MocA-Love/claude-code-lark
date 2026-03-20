@@ -1,5 +1,7 @@
 # Lark (Larksuite / Feishu)
 
+[日本語版はこちら](./README.ja.md)
+
 Connect a Lark bot to your Claude Code with an MCP server.
 
 When the bot receives a message, the MCP server forwards it to Claude and provides tools to reply, react, and edit messages. Supports both **Lark** (international) and **Feishu** (China).
