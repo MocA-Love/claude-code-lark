@@ -143,6 +143,37 @@ User (Lark) → Lark Cloud ←WebSocket→ Lark SDK (WSClient)
 
 No public URL needed. The SDK maintains a persistent WebSocket connection to Lark's servers.
 
+## Known limitations
+
+### Multiple sessions
+
+Lark routes messages to only one connected client at random. If you run multiple Claude Code sessions with the same Lark app, messages may not reach the intended session. Use separate Lark apps for parallel sessions.
+
+### Zombie connections
+
+If a session is killed with `kill -9` (SIGKILL), the WebSocket connection cannot be closed gracefully. Lark will keep routing messages to the dead connection for 4-6 minutes until its ping timeout fires. Normal termination (Ctrl+C, `kill`) closes the connection properly.
+
+To check for and clean up zombies:
+```bash
+# List running Lark plugin processes
+ps aux | grep "bun.*server.ts" | grep -v grep
+
+# Kill zombie processes
+kill <pid>
+```
+
+## Development
+
+### Plugin cache
+
+Claude Code caches installed plugins at `~/.claude/plugins/cache/`. When developing locally, changes to source files are **not automatically reflected**. Clear the cache after each change:
+
+```bash
+rm -rf ~/.claude/plugins/cache/claude-code-lark/
+```
+
+Then restart your Claude Code session.
+
 ## License
 
 Apache-2.0
