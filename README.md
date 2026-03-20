@@ -46,11 +46,10 @@ Go to **Credentials & Basic Info**. Copy the **App ID** and **App Secret**.
 
 **5. Install the plugin.**
 
-These are Claude Code commands — run `claude` to start a session first.
-
-Install the plugin:
-```
-/plugin install lark@claude-code-lark
+```bash
+git clone https://github.com/MocA-Love/claude-code-lark.git
+claude plugin marketplace add /path/to/claude-code-lark
+claude plugin install lark@claude-code-lark
 ```
 
 **6. Give the server the credentials.**
@@ -97,25 +96,6 @@ For Feishu instead of Lark, set the domain:
 
 This changes the API base URL from `open.larksuite.com` to `open.feishu.cn`.
 
-## Webhook Mode
-
-If persistent connection is unavailable, fall back to webhook mode:
-
-```
-# Set in ~/.claude/channels/lark/.env
-LARK_MODE=webhook
-```
-
-Webhook mode requires a public URL. Use ngrok:
-```sh
-ngrok http 9876
-```
-
-In the Lark Developer Console, go to **Event Subscription**:
-- Select **"Send notifications to developer's server"**
-- Set **Request URL** to `https://abc123.ngrok-free.app/webhook`
-- Optionally set Encrypt Key and Verification Token
-
 ## Access control
 
 See **[ACCESS.md](./ACCESS.md)** for DM policies, group chats, mention detection, delivery config, skill commands, and the `access.json` schema.
@@ -141,15 +121,9 @@ All set in `~/.claude/channels/lark/.env`:
 | `LARK_APP_ID` | Yes | App ID from Developer Console (starts with `cli_`) |
 | `LARK_APP_SECRET` | Yes | App Secret from Developer Console |
 | `LARK_DOMAIN` | No | API domain. Default: `open.larksuite.com`. Use `open.feishu.cn` for Feishu. |
-| `LARK_MODE` | No | Set to `webhook` for HTTP webhook mode. Default: WebSocket long connection. |
-| `LARK_WEBHOOK_PORT` | No | Webhook mode only. Local server port. Default: `9876`. |
-| `LARK_ENCRYPT_KEY` | No | Webhook mode only. Event encryption key. |
-| `LARK_VERIFICATION_TOKEN` | No | Webhook mode only. Event verification token. |
 | `LARK_ACCESS_MODE` | No | Set to `static` to freeze access config at boot. |
 
 ## Architecture
-
-### WebSocket mode (default)
 
 ```
 User (Lark) → Lark Cloud ←WebSocket→ Lark SDK (WSClient)
@@ -160,18 +134,6 @@ User (Lark) → Lark Cloud ←WebSocket→ Lark SDK (WSClient)
 ```
 
 No public URL needed. The SDK maintains a persistent WebSocket connection to Lark's servers.
-
-### Webhook mode (LARK_MODE=webhook)
-
-```
-User (Lark) → Lark Cloud → Webhook POST → Local HTTP Server (:9876)
-                                              ↓
-                                        MCP Server ←stdio→ Claude Code
-                                              ↓
-                                        Lark REST API → User (Lark)
-```
-
-Requires ngrok or similar tunneling tool for local development.
 
 ## License
 
