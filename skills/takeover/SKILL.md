@@ -7,7 +7,6 @@ allowed-tools:
   - Write
   - Bash(ls *)
   - Bash(mkdir *)
-  - Bash(ps *)
 ---
 
 # /lark:takeover — Take Over Lark Connection
@@ -24,41 +23,44 @@ Arguments passed: `$ARGUMENTS`
 
 ### No args — take over
 
-1. Read `~/.claude/channels/lark/ws.lock` and show current owner (PID,
-   started time) if it exists.
+1. Read the session registry at `~/.claude/channels/lark/sessions/`.
+   Each file is `{pid}.json` containing `{ pid, ppid, cwd, startedAt }`.
+   List all files and read them. Skip files where the process is dead.
 
-2. Find this session's MCP server PID. Run:
-   ```bash
-   ps -o pid=,ppid=,command= -ax | grep "bun.*server.ts" | grep -v grep
-   ```
-   Find the `bun server.ts` process whose parent chain includes this
-   Claude Code process. The parent PID (ppid) of `bun server.ts` is a
-   `bun run` process, whose parent is the Claude Code process.
+2. Read `~/.claude/channels/lark/ws.lock` to show the current lock owner.
 
-3. Write the takeover signal file. Get the PID of the `bun run` process
-   that is the direct parent of our `bun server.ts`:
+3. Find **this session's** entry. The entry whose `cwd` matches the
+   current working directory is most likely this session. If ambiguous
+   (multiple sessions with same cwd), show the list and ask the user
+   to pick by PID.
+
+4. Write the takeover signal file:
    ```bash
    mkdir -p ~/.claude/channels/lark
    ```
-   Write `~/.claude/channels/lark/takeover` with the ppid of our
-   `bun server.ts` process (the `bun run` wrapper PID).
+   Write `~/.claude/channels/lark/takeover` with this session's `ppid`
+   value from the registry (the `bun run` wrapper PID).
 
    The server.ts poll loop checks if this matches `process.ppid` and
    takes over the lock if it does.
 
-4. Confirm: "Takeover requested. The Lark connection will switch to this
+5. Confirm: "Takeover requested. The Lark connection will switch to this
    session within a few seconds."
 
 ### `status` — show current state
 
 1. Read `~/.claude/channels/lark/ws.lock`.
 2. Show: owner PID, started time, whether the process is alive.
-3. List all running `bun server.ts` processes.
+3. Read all files in `~/.claude/channels/lark/sessions/` and display
+   each session's PID, cwd, and startedAt. Mark which one holds the lock.
 
 ---
 
 ## Implementation notes
 
+- Each `server.ts` registers itself at startup by writing
+  `~/.claude/channels/lark/sessions/{pid}.json`.
+- Dead sessions are automatically cleaned up when listed.
 - The takeover signal file is ephemeral — the target server.ts deletes it
   after reading.
 - The previous lock holder detects the signal, releases its lock, and
