@@ -473,15 +473,26 @@ function extractTextContent(msgType: string, contentStr: string): string {
       case 'merge_forward':
         return '(forwarded messages)'
       case 'share_chat':
-        return `(shared group: ${content.chat_name ?? content.chat_id ?? 'unknown'})`
+        return `(shared group: ${content.chat_id ?? 'unknown'})`
       case 'share_user':
         return `(shared user: ${content.user_id ?? 'unknown'})`
-      case 'system':
-        return `(system: ${content.text ?? content.type ?? 'notification'})`
+      case 'system': {
+        const tpl = content.template ?? ''
+        return `(system: ${tpl || 'notification'})`
+      }
       case 'location':
-        return `(location: ${content.name ?? ''} ${content.address ?? ''})`
-      case 'todo':
-        return `(todo: ${content.task_id ?? content.content?.text ?? 'task'})`
+        return `(location: ${content.name ?? ''} lat:${content.latitude ?? ''} lon:${content.longitude ?? ''})`
+      case 'todo': {
+        let todoTitle = content.summary?.title ?? ''
+        if (!todoTitle && content.summary?.content) {
+          todoTitle = (content.summary.content as any[][])
+            .flat()
+            .filter((n: any) => n.tag === 'text')
+            .map((n: any) => n.text ?? '')
+            .join('')
+        }
+        return `(todo: ${todoTitle || (content.task_id ?? 'task')})`
+      }
       case 'vote':
         return `(vote: ${content.topic ?? 'poll'})`
       case 'hongbao':
@@ -489,11 +500,11 @@ function extractTextContent(msgType: string, contentStr: string): string {
       case 'share_calendar_event':
       case 'calendar':
       case 'general_calendar':
-        return `(calendar event)`
+        return `(calendar: ${content.summary ?? 'event'})`
       case 'video_chat':
-        return `(video chat)`
+        return `(video chat: ${content.topic ?? ''})`
       case 'folder':
-        return `(shared folder)`
+        return `(shared folder: ${content.file_name ?? ''})`
       default:
         return `(${msgType})`
     }
