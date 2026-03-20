@@ -603,6 +603,8 @@ const mcp = new Server(
       '',
       'Messages from Lark arrive as <channel source="lark" chat_id="..." message_id="..." user="..." ts="...">. If the tag has an image_path attribute, Read that file — it is an image the sender attached. If it has reply_to_text, that is the message the sender is replying to (quoted context). If it has reply_to_image_path, Read that file — it is an image from the quoted message. Reply with the reply tool — pass chat_id back. Use reply_to (set to a message_id) only when replying to an earlier message; the latest message doesn\'t need a quote-reply, omit reply_to for normal responses.',
       '',
+      'When the <channel> tag has a thread_root_id attribute, the message is inside a Lark thread. You MUST pass reply_to with the message_id so your response stays in the same thread. Never reply to the main chat when thread_root_id is present.',
+      '',
       'reply accepts file paths (files: ["/abs/path.png"]) for attachments. Images are sent as Lark image messages; other files as documents. Use react to add emoji reactions (Lark emoji type names like THUMBSUP, HEART, SMILE), and edit_message to update a message you previously sent.',
       '',
       'fetch_messages pulls recent Lark chat history. download_attachment fetches file/image attachments by message ID.',
