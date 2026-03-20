@@ -30,6 +30,7 @@ AIアシスタントがこのプラグインのインストールを支援する
 - `im:message:readonly` — DM・グループチャットのメッセージ読み取り
 - `im:message:send_as_bot` — アプリとしてメッセージ送信
 - `im:message.group_at_msg:readonly` — グループでボットへの@メンションメッセージ取得
+- `im:message.group_msg` — グループチャットの全メッセージ読み取り（グループでの `fetch_messages` に必要）
 - `im:message.p2p_msg:readonly` — ボットへのDMメッセージ取得
 - `im:resource` — 画像・ファイルの読み取りとアップロード
 - `im:chat` — グループ情報の取得と更新
