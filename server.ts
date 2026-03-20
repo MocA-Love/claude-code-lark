@@ -453,10 +453,47 @@ function extractTextContent(msgType: string, contentStr: string): string {
         return '(video)'
       case 'sticker':
         return '(sticker)'
-      case 'interactive':
-        return '(card message)'
+      case 'interactive': {
+        // Card message: extract title + text elements
+        const cardTitle = content.title ?? content.header?.title?.content ?? ''
+        const cardElements = content.elements as any[][] | undefined
+        const cardBody = cardElements
+          ? cardElements
+              .map((row: any[]) =>
+                row
+                  .filter((node: any) => node.tag === 'text')
+                  .map((node: any) => node.text ?? '')
+                  .join('')
+              )
+              .filter(Boolean)
+              .join('\n')
+          : ''
+        return cardTitle ? `${cardTitle}\n${cardBody}` : cardBody || '(card message)'
+      }
       case 'merge_forward':
         return '(forwarded messages)'
+      case 'share_chat':
+        return `(shared group: ${content.chat_name ?? content.chat_id ?? 'unknown'})`
+      case 'share_user':
+        return `(shared user: ${content.user_id ?? 'unknown'})`
+      case 'system':
+        return `(system: ${content.text ?? content.type ?? 'notification'})`
+      case 'location':
+        return `(location: ${content.name ?? ''} ${content.address ?? ''})`
+      case 'todo':
+        return `(todo: ${content.task_id ?? content.content?.text ?? 'task'})`
+      case 'vote':
+        return `(vote: ${content.topic ?? 'poll'})`
+      case 'hongbao':
+        return `(hongbao: ${content.text ?? 'red envelope'})`
+      case 'share_calendar_event':
+      case 'calendar':
+      case 'general_calendar':
+        return `(calendar event)`
+      case 'video_chat':
+        return `(video chat)`
+      case 'folder':
+        return `(shared folder)`
       default:
         return `(${msgType})`
     }
@@ -468,6 +505,22 @@ function extractTextContent(msgType: string, contentStr: string): string {
 // Safe attachment/file name
 function safeFileName(name: string): string {
   return name.replace(/[\[\]\r\n;]/g, '_')
+}
+
+// Extract image_key from message content (works for both 'image' and 'post' types)
+function extractImageKey(msgType: string, contentStr: string): string | undefined {
+  try {
+    const content = JSON.parse(contentStr)
+    if (msgType === 'image') return content.image_key
+    if (msgType === 'post' && content.content) {
+      for (const para of content.content as any[][]) {
+        for (const node of para) {
+          if (node.tag === 'img' && node.image_key) return node.image_key
+        }
+      }
+    }
+  } catch {}
+  return undefined
 }
 
 // ─── File download ──────────────────────────────────────────────────────────
@@ -533,7 +586,7 @@ const mcp = new Server(
     instructions: [
       'The sender reads Lark (Larksuite/Feishu), not this session. Anything you want them to see must go through the reply tool — your transcript output never reaches their chat.',
       '',
-      'Messages from Lark arrive as <channel source="lark" chat_id="..." message_id="..." user="..." ts="...">. Reply with the reply tool — pass chat_id back. Use reply_to (set to a message_id) only when replying to an earlier message; the latest message doesn\'t need a quote-reply, omit reply_to for normal responses.',
+      'Messages from Lark arrive as <channel source="lark" chat_id="..." message_id="..." user="..." ts="...">. If the tag has an image_path attribute, Read that file — it is an image the sender attached. If it has reply_to_text, that is the message the sender is replying to (quoted context). If it has reply_to_image_path, Read that file — it is an image from the quoted message. Reply with the reply tool — pass chat_id back. Use reply_to (set to a message_id) only when replying to an earlier message; the latest message doesn\'t need a quote-reply, omit reply_to for normal responses.',
       '',
       'reply accepts file paths (files: ["/abs/path.png"]) for attachments. Images are sent as Lark image messages; other files as documents. Use react to add emoji reactions (Lark emoji type names like THUMBSUP, HEART, SMILE), and edit_message to update a message you previously sent.',
       '',
@@ -729,7 +782,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         const limit = Math.min((args.limit as number) ?? 20, 50)
         const data = await larkApi(
           'GET',
-          `/im/v1/messages?container_id_type=chat&container_id=${chat_id}&page_size=${limit}&sort_type=ByCreateTimeDesc`,
+          `/im/v1/messages?container_id_type=chat&container_id=${chat_id}&page_size=${limit}`,
         )
         const items = (data.data?.items ?? []) as any[]
         // Reverse to show oldest first
@@ -821,6 +874,16 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
   }
 })
 
+// Replace @_user_N placeholders with actual names from mentions array
+function resolveMentions(text: string, mentions?: LarkMention[]): string {
+  if (!mentions || mentions.length === 0) return text
+  let resolved = text
+  for (const m of mentions) {
+    resolved = resolved.replaceAll(m.key, `@${m.name}`)
+  }
+  return resolved
+}
+
 // ─── Inbound message handling ───────────────────────────────────────────────
 
 async function handleInbound(event: any): Promise<void> {
@@ -841,7 +904,8 @@ async function handleInbound(event: any): Promise<void> {
     recordChatMapping(chatId, senderId)
   }
 
-  const text = extractTextContent(msgType, contentStr)
+  const rawText = extractTextContent(msgType, contentStr)
+  const text = resolveMentions(rawText, mentions)
   const result = gate(senderId, chatId, chatType, text, mentions)
 
   if (result.action === 'drop') return
@@ -874,7 +938,6 @@ async function handleInbound(event: any): Promise<void> {
   // Determine username
   const userName = sender.sender_id?.user_id ?? senderId
 
-  // Attachment info for meta
   const meta: Record<string, string> = {
     chat_id: chatId,
     message_id: messageId,
@@ -885,13 +948,48 @@ async function handleInbound(event: any): Promise<void> {
       : new Date().toISOString(),
   }
 
-  // Add attachment hints
-  if (msgType === 'image' || msgType === 'file') {
+  // Auto-download image attachments (from 'image' or 'post' with embedded images)
+  const imageKey = extractImageKey(msgType, contentStr)
+  if (imageKey) {
+    try {
+      const path = await downloadFile(messageId, imageKey, 'image')
+      meta.image_path = path
+    } catch (err) {
+      process.stderr.write(`lark channel: image download failed: ${err}\n`)
+    }
+  } else if (msgType === 'file') {
     meta.has_attachment = 'true'
-    meta.attachment_type = msgType
+    meta.attachment_type = 'file'
   }
 
-  const content = text || '(attachment)'
+  // Fetch reply-to message context
+  const parentId = message.parent_id
+  if (parentId) {
+    meta.reply_to_message_id = parentId
+    try {
+      const data = await larkApi('GET', `/im/v1/messages/${validateId(parentId, 'parent_id')}`)
+      if (data.data) {
+        const parentMsg = data.data.items?.[0] ?? data.data
+        const parentType = parentMsg.msg_type ?? 'text'
+        const parentContent = parentMsg.body?.content ?? '{}'
+        const parentText = extractTextContent(parentType, parentContent)
+        if (parentText) meta.reply_to_text = parentText
+
+        // Auto-download image from reply-to message (image or post with embedded image)
+        const parentImageKey = extractImageKey(parentType, parentContent)
+        if (parentImageKey) {
+          try {
+            const path = await downloadFile(parentId, parentImageKey, 'image')
+            meta.reply_to_image_path = path
+          } catch {}
+        }
+      }
+    } catch (err) {
+      process.stderr.write(`lark channel: failed to fetch reply-to message: ${err}\n`)
+    }
+  }
+
+  const content = text || (meta.image_path ? '(image)' : '(attachment)')
 
   void mcp.notification({
     method: 'notifications/claude/channel',
@@ -925,6 +1023,16 @@ const wsClient = new Lark.WSClient({
 })
 
 wsClient.start({ eventDispatcher })
+
+// Graceful shutdown — close WebSocket to prevent zombie connections.
+// Lark routes messages randomly across connected clients, so a zombie
+// connection absorbs messages that never reach the new session.
+const shutdown = () => {
+  wsClient.close({ force: true })
+  process.exit(0)
+}
+process.on('SIGINT', shutdown)
+process.on('SIGTERM', shutdown)
 
 process.stderr.write(
   `lark channel: connected` +
