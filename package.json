@@ -8,6 +8,7 @@
     "start": "bun install --no-summary && bun server.ts"
   },
   "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.24.0",
     "@modelcontextprotocol/sdk": "^1.0.0"
   }
 }

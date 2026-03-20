@@ -6,8 +6,8 @@
  * group support with mention-triggering. State lives in
  * ~/.claude/channels/lark/access.json — managed by the /lark:access skill.
  *
- * Lark uses webhook events — a local HTTP server receives them. For local
- * development, expose the port with ngrok or similar tunneling tool.
+ * Default: WebSocket long connection via Lark SDK (no public URL needed).
+ * Fallback: Set LARK_MODE=webhook for HTTP webhook mode (requires ngrok).
  * Supports both Lark (international) and Feishu (China) via LARK_DOMAIN.
  */
 
@@ -17,6 +17,7 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
+import * as Lark from '@larksuiteoapi/node-sdk'
 import { createHash, createDecipheriv, randomBytes } from 'crypto'
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync } from 'fs'
 import { homedir } from 'os'
@@ -46,6 +47,7 @@ const WEBHOOK_PORT = Number(process.env.LARK_WEBHOOK_PORT ?? 9876)
 const API_DOMAIN = process.env.LARK_DOMAIN ?? 'open.larksuite.com'
 const API_BASE = `https://${API_DOMAIN}/open-apis`
 const STATIC = process.env.LARK_ACCESS_MODE === 'static'
+const USE_WEBHOOK = process.env.LARK_MODE === 'webhook'
 
 if (!APP_ID || !APP_SECRET) {
   process.stderr.write(
@@ -929,113 +931,125 @@ async function handleInbound(event: any): Promise<void> {
   })
 }
 
-// ─── Webhook HTTP server ────────────────────────────────────────────────────
+// ─── Event transport ────────────────────────────────────────────────────────
 
 await mcp.connect(new StdioServerTransport())
+await fetchBotInfo()
 
-Bun.serve({
-  port: WEBHOOK_PORT,
-  hostname: '0.0.0.0',
-  fetch: async (req) => {
-    const url = new URL(req.url)
+if (USE_WEBHOOK) {
+  // ─── Webhook mode (LARK_MODE=webhook) ───────────────────────────────────
+  Bun.serve({
+    port: WEBHOOK_PORT,
+    hostname: '0.0.0.0',
+    fetch: async (req) => {
+      const url = new URL(req.url)
 
-    // Health check
-    if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok', bot: botName }), {
-        headers: { 'Content-Type': 'application/json' },
-      })
-    }
-
-    // Only accept POST to /webhook
-    if (req.method !== 'POST' || (url.pathname !== '/webhook' && url.pathname !== '/')) {
-      return new Response('Not Found', { status: 404 })
-    }
-
-    try {
-      let body: any
-      const rawBody = await req.text()
-
-      // Verify X-Lark-Signature if encrypt key is set
-      if (ENCRYPT_KEY) {
-        const timestamp = req.headers.get('X-Lark-Request-Timestamp') ?? ''
-        const nonce = req.headers.get('X-Lark-Request-Nonce') ?? ''
-        const expectedSig = req.headers.get('X-Lark-Signature') ?? ''
-        if (timestamp && nonce && expectedSig) {
-          const content = timestamp + nonce + ENCRYPT_KEY + rawBody
-          const sig = createHash('sha256').update(content).digest('hex')
-          if (sig !== expectedSig) {
-            return new Response('Invalid signature', { status: 403 })
-          }
-        }
-      }
-
-      // Handle encrypted events
-      const parsed = JSON.parse(rawBody)
-      if (parsed.encrypt && ENCRYPT_KEY) {
-        const decrypted = decryptEvent(parsed.encrypt)
-        body = JSON.parse(decrypted)
-      } else {
-        body = parsed
-      }
-
-      // Verify token before any processing (including url_verification)
-      if (VERIFICATION_TOKEN) {
-        const token = body.header?.token ?? body.token
-        if (token !== VERIFICATION_TOKEN) {
-          return new Response('Invalid token', { status: 403 })
-        }
-      }
-
-      // URL verification (challenge-response)
-      if (body.type === 'url_verification') {
-        return new Response(
-          JSON.stringify({ challenge: body.challenge }),
-          { headers: { 'Content-Type': 'application/json' } },
-        )
-      }
-
-      // Event handling
-      const header = body.header ?? body
-      const eventType = header.event_type ?? body.type
-
-      // Dedup
-      const eventId = header.event_id ?? ''
-      if (eventId && isDuplicate(eventId)) {
-        return new Response(JSON.stringify({ ok: true }), {
+      if (url.pathname === '/health') {
+        return new Response(JSON.stringify({ status: 'ok', bot: botName }), {
           headers: { 'Content-Type': 'application/json' },
         })
       }
 
-      if (eventType === 'im.message.receive_v1') {
-        const event = body.event
-        if (event) {
-          // Ignore bot's own messages
-          const senderType = event.sender?.sender_type
-          if (senderType === 'app') {
-            return new Response(JSON.stringify({ ok: true }), {
-              headers: { 'Content-Type': 'application/json' },
-            })
-          }
-          handleInbound(event).catch(e =>
-            process.stderr.write(`lark: handleInbound failed: ${e}\n`),
-          )
-        }
+      if (req.method !== 'POST' || (url.pathname !== '/webhook' && url.pathname !== '/')) {
+        return new Response('Not Found', { status: 404 })
       }
 
-      return new Response(JSON.stringify({ ok: true }), {
-        headers: { 'Content-Type': 'application/json' },
-      })
-    } catch (err) {
-      process.stderr.write(`lark channel: webhook error: ${err}\n`)
-      return new Response('Internal Error', { status: 500 })
-    }
-  },
-})
+      try {
+        let body: any
+        const rawBody = await req.text()
 
-// Fetch bot info and announce readiness
-await fetchBotInfo()
-process.stderr.write(
-  `lark channel: webhook server listening on port ${WEBHOOK_PORT}` +
-  (botName ? ` (bot: ${botName})` : '') + '\n' +
-  `  configure webhook URL: http://<your-host>:${WEBHOOK_PORT}/webhook\n`,
-)
+        if (ENCRYPT_KEY) {
+          const timestamp = req.headers.get('X-Lark-Request-Timestamp') ?? ''
+          const nonce = req.headers.get('X-Lark-Request-Nonce') ?? ''
+          const expectedSig = req.headers.get('X-Lark-Signature') ?? ''
+          if (timestamp && nonce && expectedSig) {
+            const content = timestamp + nonce + ENCRYPT_KEY + rawBody
+            const sig = createHash('sha256').update(content).digest('hex')
+            if (sig !== expectedSig) {
+              return new Response('Invalid signature', { status: 403 })
+            }
+          }
+        }
+
+        const parsed = JSON.parse(rawBody)
+        if (parsed.encrypt && ENCRYPT_KEY) {
+          body = JSON.parse(decryptEvent(parsed.encrypt))
+        } else {
+          body = parsed
+        }
+
+        if (VERIFICATION_TOKEN) {
+          const token = body.header?.token ?? body.token
+          if (token !== VERIFICATION_TOKEN) {
+            return new Response('Invalid token', { status: 403 })
+          }
+        }
+
+        if (body.type === 'url_verification') {
+          return new Response(
+            JSON.stringify({ challenge: body.challenge }),
+            { headers: { 'Content-Type': 'application/json' } },
+          )
+        }
+
+        const header = body.header ?? body
+        const eventId = header.event_id ?? ''
+        if (eventId && isDuplicate(eventId)) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+
+        if ((header.event_type ?? body.type) === 'im.message.receive_v1') {
+          const event = body.event
+          if (event && event.sender?.sender_type !== 'app') {
+            handleInbound(event).catch(e =>
+              process.stderr.write(`lark: handleInbound failed: ${e}\n`),
+            )
+          }
+        }
+
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      } catch (err) {
+        process.stderr.write(`lark channel: webhook error: ${err}\n`)
+        return new Response('Internal Error', { status: 500 })
+      }
+    },
+  })
+
+  process.stderr.write(
+    `lark channel: webhook mode on port ${WEBHOOK_PORT}` +
+    (botName ? ` (bot: ${botName})` : '') + '\n' +
+    `  configure webhook URL: http://<your-host>:${WEBHOOK_PORT}/webhook\n`,
+  )
+} else {
+  // ─── WebSocket long connection mode (default) ───────────────────────────
+  const larkDomain = API_DOMAIN === 'open.feishu.cn'
+    ? Lark.Domain.Feishu
+    : Lark.Domain.Lark
+
+  const eventDispatcher = new Lark.EventDispatcher({}).register({
+    'im.message.receive_v1': (data: any) => {
+      if (data.sender?.sender_type === 'app') return
+      handleInbound(data).catch(e =>
+        process.stderr.write(`lark: handleInbound failed: ${e}\n`),
+      )
+    },
+  })
+
+  const wsClient = new Lark.WSClient({
+    appId: APP_ID!,
+    appSecret: APP_SECRET!,
+    domain: larkDomain,
+    loggerLevel: Lark.LoggerLevel.info,
+  })
+
+  wsClient.start({ eventDispatcher })
+
+  process.stderr.write(
+    `lark channel: WebSocket long connection mode` +
+    (botName ? ` (bot: ${botName})` : '') + '\n',
+  )
+}
