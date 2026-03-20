@@ -58,7 +58,7 @@ Before the plugin can work, the user needs to create a Lark app:
 
 1. Go to [Lark Open Platform](https://open.larksuite.com/app) → Create Custom App
 2. Enable **Bot** under Features
-3. Add permissions: `im:message`, `im:message:send_as_bot`, `im:message.group_at_msg:readonly`, `im:message.p2p_msg:readonly`, `im:resource`, `im:chat`
+3. Add permissions: `im:message`, `im:message:readonly`, `im:message:send_as_bot`, `im:message.group_at_msg:readonly`, `im:message.p2p_msg:readonly`, `im:resource`, `im:chat`, `im:chat:readonly`
 4. Under **Events & Callbacks** → Event Configuration:
    - Select **"Receive events through persistent connection"**
    - Add event: `im.message.receive_v1`
