@@ -28,12 +28,12 @@ Navigate to **Features** → **Bot** and enable the bot capability.
 
 Go to **Permissions & Scopes** and add the following:
 
-- `im:message` — Read messages
-- `im:message:send_as_bot` — Send messages as bot
-- `im:message.group_at_msg` — Receive @mention messages in groups
-- `im:message.p2p_msg` — Receive p2p (DM) messages
-- `im:resource` — Download message resources (images, files)
-- `im:chat` — Read chat info (for fetch_messages)
+- `im:message` — Read and send direct messages and group chat messages
+- `im:message:send_as_bot` — Send messages as an app
+- `im:message.group_at_msg:readonly` — Obtain group messages mentioning the bot
+- `im:message.p2p_msg:readonly` — Get direct messages sent to bot
+- `im:resource` — Read and upload images or other files
+- `im:chat` — Obtain and update group information
 
 Publish a version and approve it (self-built apps need tenant admin approval).
 

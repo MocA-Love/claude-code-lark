@@ -26,12 +26,12 @@ AIアシスタントがこのプラグインのインストールを支援する
 
 **Permissions & Scopes** で以下を追加:
 
-- `im:message` — メッセージ読み取り
-- `im:message:send_as_bot` — ボットとしてメッセージ送信
-- `im:message.group_at_msg` — グループでの@メンション受信
-- `im:message.p2p_msg` — DM受信
-- `im:resource` — 添付ファイルのダウンロード
-- `im:chat` — チャット情報の読み取り
+- `im:message` — DM・グループチャットのメッセージ読み取りと送信
+- `im:message:send_as_bot` — アプリとしてメッセージ送信
+- `im:message.group_at_msg:readonly` — グループでボットへの@メンションメッセージ取得
+- `im:message.p2p_msg:readonly` — ボットへのDMメッセージ取得
+- `im:resource` — 画像・ファイルの読み取りとアップロード
+- `im:chat` — グループ情報の取得と更新
 
 バージョンを公開し、承認する（自作アプリはテナント管理者の承認が必要）。
 
