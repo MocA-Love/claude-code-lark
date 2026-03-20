@@ -1,0 +1,154 @@
+# Lark (Larksuite / Feishu)
+
+Connect a Lark bot to your Claude Code with an MCP server.
+
+When the bot receives a message, the MCP server forwards it to Claude and provides tools to reply, react, and edit messages. Supports both **Lark** (international) and **Feishu** (China).
+
+## Prerequisites
+
+- [Bun](https://bun.sh) — the MCP server runs on Bun. Install with `curl -fsSL https://bun.sh/install | bash`.
+- A tunneling tool like [ngrok](https://ngrok.com) for local development (to expose the webhook endpoint).
+
+## Quick Setup
+
+> Default pairing flow for a single-user DM bot. See [ACCESS.md](./ACCESS.md) for groups and multi-user setups.
+
+**1. Create a Lark application and bot.**
+
+Go to the [Lark Open Platform](https://open.larksuite.com/app) (or [Feishu Open Platform](https://open.feishu.cn/app) for China) and click **Create Custom App**. Give it a name.
+
+Navigate to **Features** → **Bot** and enable the bot capability.
+
+**2. Configure permissions.**
+
+Go to **Permissions & Scopes** and add the following:
+
+- `im:message` — Read messages
+- `im:message:send_as_bot` — Send messages as bot
+- `im:message.group_at_msg` — Receive @mention messages in groups
+- `im:message.p2p_msg` — Receive p2p (DM) messages
+- `im:resource` — Download message resources (images, files)
+- `im:chat` — Read chat info (for fetch_messages)
+
+Publish a version and approve it (self-built apps need tenant admin approval).
+
+**3. Get app credentials.**
+
+Go to **Credentials & Basic Info**. Copy the **App ID** and **App Secret**.
+
+**4. Install the plugin.**
+
+These are Claude Code commands — run `claude` to start a session first.
+
+Install the plugin:
+```
+/plugin install lark@claude-code-lark
+```
+
+**5. Give the server the credentials.**
+
+```
+/lark:configure cli_xxxx your_app_secret_here
+```
+
+Writes `LARK_APP_ID=...` and `LARK_APP_SECRET=...` to `~/.claude/channels/lark/.env`.
+
+**6. Set up the webhook.**
+
+Start a tunnel to expose the local webhook server:
+```sh
+ngrok http 9876
+```
+
+Copy the HTTPS URL from ngrok (e.g., `https://abc123.ngrok-free.app`).
+
+In the Lark Developer Console, go to **Event Subscription**:
+- Set **Request URL** to `https://abc123.ngrok-free.app/webhook`
+- Add event: `im.message.receive_v1` (Receive messages)
+
+Optional: set an **Encrypt Key** and **Verification Token** for security:
+```
+/lark:configure encrypt your_encrypt_key your_verification_token
+```
+
+**7. Relaunch with the channel flag.**
+
+Exit your session and start a new one:
+
+```sh
+claude --channels plugin:lark@claude-code-lark
+```
+
+**8. Pair.**
+
+With Claude Code running, DM your bot on Lark — it replies with a pairing code. In your Claude Code session:
+
+```
+/lark:access pair <code>
+```
+
+Your next DM reaches the assistant.
+
+**9. Lock it down.**
+
+Pairing is for capturing IDs. Once you're in, switch to `allowlist`:
+
+```
+/lark:access policy allowlist
+```
+
+## Feishu (China) Setup
+
+For Feishu instead of Lark, set the domain:
+
+```
+/lark:configure domain open.feishu.cn
+```
+
+This changes the API base URL from `open.larksuite.com` to `open.feishu.cn`.
+
+## Access control
+
+See **[ACCESS.md](./ACCESS.md)** for DM policies, group chats, mention detection, delivery config, skill commands, and the `access.json` schema.
+
+Quick reference: IDs are Lark **open_id** values (e.g., `ou_xxxx`) for users and **chat_id** values (e.g., `oc_xxxx`) for chats. Default policy is `pairing`. Group chats are opt-in per chat_id.
+
+## Tools exposed to the assistant
+
+| Tool | Purpose |
+| --- | --- |
+| `reply` | Send to a chat. Takes `chat_id` + `text`, optionally `reply_to` (message_id) for threading and `files` (absolute paths) for attachments. Images send as Lark image messages; other files as documents. Auto-chunks; returns sent message ID(s). |
+| `react` | Add an emoji reaction to any message by ID. Use Lark emoji type names (THUMBSUP, HEART, SMILE, etc). |
+| `edit_message` | Edit a message the bot previously sent. Only works on the bot's own messages. |
+| `fetch_messages` | Pull recent history from a chat (oldest-first). Max 50 per call. Each line includes the message ID. |
+| `download_attachment` | Download image or file from a specific message by ID to `~/.claude/channels/lark/inbox/`. Returns file paths + metadata. |
+
+## Environment variables
+
+All set in `~/.claude/channels/lark/.env`:
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `LARK_APP_ID` | Yes | App ID from Developer Console (starts with `cli_`) |
+| `LARK_APP_SECRET` | Yes | App Secret from Developer Console |
+| `LARK_DOMAIN` | No | API domain. Default: `open.larksuite.com`. Use `open.feishu.cn` for Feishu. |
+| `LARK_WEBHOOK_PORT` | No | Local webhook server port. Default: `9876`. |
+| `LARK_ENCRYPT_KEY` | No | Event encryption key (from Event Subscription settings). |
+| `LARK_VERIFICATION_TOKEN` | No | Event verification token (from Event Subscription settings). |
+| `LARK_ACCESS_MODE` | No | Set to `static` to freeze access config at boot. |
+
+## Architecture
+
+```
+User (Lark) → Lark Cloud → Webhook POST → Local HTTP Server (:9876)
+                                              ↓
+                                        MCP Server ←stdio→ Claude Code
+                                              ↓
+                                        Lark REST API → User (Lark)
+```
+
+The MCP server runs a local HTTP server to receive webhook events from Lark. For local development, use ngrok or a similar tunneling tool to expose the port. For production, deploy behind a reverse proxy with HTTPS.
+
+## License
+
+Apache-2.0
