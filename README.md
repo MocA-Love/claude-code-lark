@@ -32,6 +32,7 @@ Go to **Permissions & Scopes** and add the following:
 - `im:message:readonly` — Read direct messages and group chat messages
 - `im:message:send_as_bot` — Send messages as an app
 - `im:message.group_at_msg:readonly` — Obtain group messages mentioning the bot
+- `im:message.group_msg` — Read all messages in group chats (required for `fetch_messages` in groups)
 - `im:message.p2p_msg:readonly` — Get direct messages sent to bot
 - `im:resource` — Read and upload images or other files
 - `im:chat` — Obtain and update group information
