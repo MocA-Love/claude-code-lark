@@ -4,6 +4,10 @@ Lark ボットを Claude Code に接続する MCP サーバー。
 
 ボットがメッセージを受信すると、MCP サーバーが Claude に転送し、返信・リアクション・メッセージ編集のツールを提供します。**Lark**（国際版）と **Feishu / 飛書**（中国版）の両方に対応。
 
+## LLM向け
+
+AIアシスタントがこのプラグインのインストールを支援する場合は、[llms.md](./llms.md) を参照してください。自動インストール手順が記載されています。
+
 ## 前提条件
 
 - [Bun](https://bun.sh) — `curl -fsSL https://bun.sh/install | bash` でインストール

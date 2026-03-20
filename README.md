@@ -6,6 +6,10 @@ Connect a Lark bot to your Claude Code with an MCP server.
 
 When the bot receives a message, the MCP server forwards it to Claude and provides tools to reply, react, and edit messages. Supports both **Lark** (international) and **Feishu** (China).
 
+## For LLMs
+
+If you're an AI assistant helping a user install this plugin, see [llms.md](./llms.md) for automated installation instructions.
+
 ## Prerequisites
 
 - [Bun](https://bun.sh) — the MCP server runs on Bun. Install with `curl -fsSL https://bun.sh/install | bash`.
