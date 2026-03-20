@@ -82,7 +82,8 @@ claude-code-lark/
 │   └── marketplace.json     # Marketplace definition
 ├── skills/
 │   ├── configure/SKILL.md   # /lark:configure skill
-│   └── access/SKILL.md      # /lark:access skill
+│   ├── access/SKILL.md      # /lark:access skill
+│   └── takeover/SKILL.md    # /lark:takeover skill (switch Lark connection between sessions)
 ├── .mcp.json                # MCP server configuration
 ├── server.ts                # Main MCP server (Bun + Lark SDK)
 ├── package.json             # Dependencies
@@ -99,3 +100,5 @@ claude-code-lark/
 | Bot doesn't respond to DMs | Check that `im:message.p2p_msg` permission is added and app version is published |
 | "chat is not allowlisted" | Run `/lark:access pair <code>` first, or `/lark:access allow <open_id>` |
 | WebSocket connection fails | Verify App ID/Secret are correct and the app is published |
+| "skipped (another session holds the lock)" | Another Claude Code session already has the Lark connection. Run `/lark:takeover` to switch it to this session |
+| `fetch_messages` returns HTTP 400 in groups | Add `im:message.group_msg` permission in Developer Console and republish the app |

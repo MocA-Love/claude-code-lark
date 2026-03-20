@@ -154,11 +154,19 @@ To switch the Lark connection to a different session, run in the target session:
 /lark:takeover
 ```
 
+To check which sessions are running and who holds the lock:
+
+```
+/lark:takeover status
+```
+
+Each plugin process registers itself in `~/.claude/channels/lark/sessions/` with its PID, working directory, and start time. The takeover skill reads this registry to identify sessions instantly — no process tree traversal needed.
+
 The previous session releases the connection within ~3 seconds, and the current session takes over. This is useful when you want to continue work from your phone via Lark — switch to the session you're working on, and Lark messages will reach it with full context.
 
 ### Zombie connections
 
-If a session is killed with `kill -9` (SIGKILL), the lock file may be stale. Another session will automatically detect the dead process and acquire the lock. You can also manually clean up:
+If a session is killed with `kill -9` (SIGKILL), the lock and session files may be stale. Other sessions automatically detect dead processes and clean up. You can also manually clean up:
 
 ```bash
 # List running Lark plugin processes

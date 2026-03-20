@@ -18,6 +18,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 import * as Lark from '@larksuiteoapi/node-sdk'
 import { randomBytes } from 'crypto'
+import { execSync } from 'child_process'
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync } from 'fs'
 import { homedir } from 'os'
 import { join, sep } from 'path'
@@ -31,6 +32,7 @@ const ENV_FILE = join(STATE_DIR, '.env')
 const INBOX_DIR = join(STATE_DIR, 'inbox')
 const LOCK_FILE = join(STATE_DIR, 'ws.lock')
 const TAKEOVER_FILE = join(STATE_DIR, 'takeover')
+const SESSIONS_DIR = join(STATE_DIR, 'sessions')
 
 // Load ~/.claude/channels/lark/.env into process.env. Real env wins.
 try {
@@ -1035,6 +1037,56 @@ function isProcessAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true } catch { return false }
 }
 
+// ─── Session registry ────────────────────────────────────────────────────────
+// Each server.ts registers itself in SESSIONS_DIR so the /lark:takeover skill
+// can list sessions without tracing process trees.
+
+type SessionInfo = { pid: number; ppid: number; cwd: string; startedAt: number }
+
+function getClaudeCwd(): string {
+  try {
+    const claudePid = execSync(`ps -o ppid= -p ${process.ppid}`, { encoding: 'utf8' }).trim()
+    return execSync(
+      `lsof -a -p ${claudePid} -d cwd -Fn 2>/dev/null | awk '/^n/{print substr($0,2)}'`,
+      { encoding: 'utf8' },
+    ).trim() || process.cwd()
+  } catch { return process.cwd() }
+}
+
+function registerSession(): void {
+  mkdirSync(SESSIONS_DIR, { recursive: true, mode: 0o700 })
+  const info: SessionInfo = {
+    pid: process.pid,
+    ppid: process.ppid,
+    cwd: getClaudeCwd(),
+    startedAt: Date.now(),
+  }
+  writeFileSync(join(SESSIONS_DIR, `${process.pid}.json`), JSON.stringify(info, null, 2) + '\n', { mode: 0o600 })
+}
+
+function unregisterSession(): void {
+  try { rmSync(join(SESSIONS_DIR, `${process.pid}.json`), { force: true }) } catch {}
+}
+
+function listSessions(): SessionInfo[] {
+  try {
+    const files = readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json'))
+    const sessions: SessionInfo[] = []
+    for (const f of files) {
+      try {
+        const info: SessionInfo = JSON.parse(readFileSync(join(SESSIONS_DIR, f), 'utf8'))
+        if (isProcessAlive(info.pid)) {
+          sessions.push(info)
+        } else {
+          // Dead session — clean up
+          rmSync(join(SESSIONS_DIR, f), { force: true })
+        }
+      } catch { rmSync(join(SESSIONS_DIR, f), { force: true }) }
+    }
+    return sessions
+  } catch { return [] }
+}
+
 function acquireLock(): boolean {
   const lock = readLock()
   if (lock && isProcessAlive(lock.pid) && lock.pid !== process.pid) {
@@ -1048,6 +1100,7 @@ function acquireLock(): boolean {
 
 await mcp.connect(new StdioServerTransport())
 await fetchBotInfo()
+registerSession()
 
 const larkDomain = API_DOMAIN === 'open.feishu.cn'
   ? Lark.Domain.Feishu
@@ -1142,6 +1195,7 @@ lockCheckInterval = setInterval(() => {
 // Graceful shutdown
 const shutdown = () => {
   if (lockCheckInterval) clearInterval(lockCheckInterval)
+  unregisterSession()
   const lock = readLock()
   if (lock?.pid === process.pid) removeLock()
   if (wsClient) wsClient.close({ force: true })
