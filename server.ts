@@ -963,6 +963,11 @@ async function handleInbound(event: any): Promise<void> {
       : new Date().toISOString(),
   }
 
+  // Thread context: root_id is set when the message is inside a thread
+  if (message.root_id) {
+    meta.thread_root_id = message.root_id
+  }
+
   // Auto-download image attachments (from 'image' or 'post' with embedded images)
   const imageKey = extractImageKey(msgType, contentStr)
   if (imageKey) {
