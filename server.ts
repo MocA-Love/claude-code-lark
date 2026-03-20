@@ -29,6 +29,8 @@ const ACCESS_FILE = join(STATE_DIR, 'access.json')
 const APPROVED_DIR = join(STATE_DIR, 'approved')
 const ENV_FILE = join(STATE_DIR, '.env')
 const INBOX_DIR = join(STATE_DIR, 'inbox')
+const LOCK_FILE = join(STATE_DIR, 'ws.lock')
+const TAKEOVER_FILE = join(STATE_DIR, 'takeover')
 
 // Load ~/.claude/channels/lark/.env into process.env. Real env wins.
 try {
@@ -1008,6 +1010,40 @@ async function handleInbound(event: any): Promise<void> {
   })
 }
 
+// ─── Lock file for exclusive WSClient connection ────────────────────────────
+
+type LockData = { pid: number; startedAt: number }
+
+function readLock(): LockData | null {
+  try {
+    return JSON.parse(readFileSync(LOCK_FILE, 'utf8'))
+  } catch { return null }
+}
+
+function writeLock(): void {
+  mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 })
+  const tmp = LOCK_FILE + '.tmp'
+  writeFileSync(tmp, JSON.stringify({ pid: process.pid, startedAt: Date.now() }), { mode: 0o600 })
+  renameSync(tmp, LOCK_FILE)
+}
+
+function removeLock(): void {
+  try { rmSync(LOCK_FILE, { force: true }) } catch {}
+}
+
+function isProcessAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true } catch { return false }
+}
+
+function acquireLock(): boolean {
+  const lock = readLock()
+  if (lock && isProcessAlive(lock.pid) && lock.pid !== process.pid) {
+    return false // another session holds the lock
+  }
+  writeLock()
+  return true
+}
+
 // ─── WebSocket long connection ──────────────────────────────────────────────
 
 await mcp.connect(new StdioServerTransport())
@@ -1026,26 +1062,90 @@ const eventDispatcher = new Lark.EventDispatcher({}).register({
   },
 })
 
-const wsClient = new Lark.WSClient({
-  appId: APP_ID!,
-  appSecret: APP_SECRET!,
-  domain: larkDomain,
-  loggerLevel: Lark.LoggerLevel.info,
-})
+let wsClient: InstanceType<typeof Lark.WSClient> | null = null
+let lockCheckInterval: ReturnType<typeof setInterval> | null = null
 
-wsClient.start({ eventDispatcher })
+function startWsClient(): void {
+  if (wsClient) return
+  wsClient = new Lark.WSClient({
+    appId: APP_ID!,
+    appSecret: APP_SECRET!,
+    domain: larkDomain,
+    loggerLevel: Lark.LoggerLevel.info,
+  })
+  wsClient.start({ eventDispatcher })
+  process.stderr.write(
+    `lark channel: connected` +
+    (botName ? ` (bot: ${botName})` : '') + '\n',
+  )
+}
 
-// Graceful shutdown — close WebSocket to prevent zombie connections.
-// Lark routes messages randomly across connected clients, so a zombie
-// connection absorbs messages that never reach the new session.
-const shutdown = () => {
+function stopWsClient(): void {
+  if (!wsClient) return
   wsClient.close({ force: true })
+  wsClient = null
+  process.stderr.write('lark channel: disconnected (lock lost)\n')
+}
+
+if (acquireLock()) {
+  startWsClient()
+} else {
+  const lock = readLock()
+  process.stderr.write(
+    `lark channel: skipped (another session holds the lock, pid: ${lock?.pid})\n` +
+    `  run /lark:takeover to take over the connection\n`,
+  )
+}
+
+// Poll lock ownership and takeover signals
+lockCheckInterval = setInterval(() => {
+  // Check for takeover signal from /lark:takeover skill.
+  // The signal file contains the Claude Code PID that requested takeover.
+  // Each server.ts checks if the signal matches its own parent process.
+  try {
+    const signalPid = Number(readFileSync(TAKEOVER_FILE, 'utf8').trim())
+    const myParentPid = process.ppid
+    // Match: signal targets our parent Claude Code process (or grandparent via bun run)
+    if (signalPid === myParentPid || signalPid === process.pid) {
+      rmSync(TAKEOVER_FILE, { force: true })
+      if (!wsClient) {
+        writeLock()
+        startWsClient()
+      }
+      return
+    }
+    // Not for us — if we hold the lock, release it so the target can acquire
+    if (wsClient) {
+      const lock = readLock()
+      if (lock?.pid === process.pid) {
+        removeLock()
+        stopWsClient()
+      }
+    }
+    return
+  } catch {} // no signal file — normal check
+
+  const lock = readLock()
+  if (wsClient) {
+    // We have the connection — check if lock is still ours
+    if (!lock || lock.pid !== process.pid) {
+      stopWsClient()
+    }
+  } else {
+    // We don't have the connection — check if lock is free (owner died)
+    if (!lock || !isProcessAlive(lock.pid)) {
+      if (acquireLock()) startWsClient()
+    }
+  }
+}, 3000)
+
+// Graceful shutdown
+const shutdown = () => {
+  if (lockCheckInterval) clearInterval(lockCheckInterval)
+  const lock = readLock()
+  if (lock?.pid === process.pid) removeLock()
+  if (wsClient) wsClient.close({ force: true })
   process.exit(0)
 }
 process.on('SIGINT', shutdown)
 process.on('SIGTERM', shutdown)
-
-process.stderr.write(
-  `lark channel: connected` +
-  (botName ? ` (bot: ${botName})` : '') + '\n',
-)
